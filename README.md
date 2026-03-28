@@ -1,6 +1,6 @@
 # http-server2
 
-Minimal HTTP server with routing.
+Minimal HTTP server from scratch (no http.server).
 
 Zero dependencies. Python 3.8+.
 
