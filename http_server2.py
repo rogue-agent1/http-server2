@@ -1,55 +1,55 @@
 #!/usr/bin/env python3
-"""http_server2 - HTTP/1.1 server from raw sockets."""
-import argparse, socket, os, mimetypes, datetime
+"""HTTP/1.1 server with routing, middleware, and static files."""
+import sys, os, json, mimetypes
+from http.server import HTTPServer, BaseHTTPRequestHandler
+from urllib.parse import urlparse, parse_qs
 
-MIME = {'.html': 'text/html', '.css': 'text/css', '.js': 'application/javascript',
-        '.json': 'application/json', '.png': 'image/png', '.jpg': 'image/jpeg',
-        '.gif': 'image/gif', '.txt': 'text/plain', '.svg': 'image/svg+xml'}
+class Router:
+    def __init__(self): self.routes = []; self.middleware = []
+    def route(self, method, path):
+        def decorator(fn):
+            self.routes.append((method, path, fn)); return fn
+        return decorator
+    def use(self, middleware_fn): self.middleware.append(middleware_fn)
+    def match(self, method, path):
+        for m, p, fn in self.routes:
+            if m == method:
+                params = self._match_path(p, path)
+                if params is not None: return fn, params
+        return None, {}
+    def _match_path(self, pattern, path):
+        pp = pattern.strip('/').split('/'); rp = path.strip('/').split('/')
+        if len(pp) != len(rp): return None
+        params = {}
+        for p, r in zip(pp, rp):
+            if p.startswith(':'): params[p[1:]] = r
+            elif p != r: return None
+        return params
 
-def handle_request(conn, root):
-    data = conn.recv(8192).decode(errors='replace')
-    if not data: return
-    lines = data.split('\r\n')
-    method, path, _ = lines[0].split(' ', 2)
-    path = path.split('?')[0]
-    if path == '/': path = '/index.html'
-    filepath = os.path.join(root, path.lstrip('/'))
-    filepath = os.path.realpath(filepath)
-    if not filepath.startswith(os.path.realpath(root)):
-        send_response(conn, 403, "Forbidden", b"403 Forbidden")
-        return
-    if os.path.isfile(filepath):
-        ext = os.path.splitext(filepath)[1]
-        ct = MIME.get(ext, 'application/octet-stream')
-        body = open(filepath, 'rb').read()
-        send_response(conn, 200, "OK", body, ct)
-    else:
-        send_response(conn, 404, "Not Found", b"404 Not Found")
-    now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    status = 200 if os.path.isfile(filepath) else 404
-    print(f"[{now}] {method} {path} -> {status}")
+class Request:
+    def __init__(self, method, path, headers=None, body=None, query=None):
+        self.method, self.path = method, path
+        self.headers = headers or {}; self.body = body; self.query = query or {}
 
-def send_response(conn, code, reason, body, content_type='text/plain'):
-    headers = f"HTTP/1.1 {code} {reason}\r\nContent-Type: {content_type}\r\nContent-Length: {len(body)}\r\nConnection: close\r\n\r\n"
-    conn.sendall(headers.encode() + body)
+class Response:
+    def __init__(self): self.status = 200; self.headers = {"Content-Type":"text/plain"}; self.body = ""
+    def json(self, data): self.headers["Content-Type"] = "application/json"; self.body = json.dumps(data); return self
+    def html(self, content): self.headers["Content-Type"] = "text/html"; self.body = content; return self
 
 def main():
-    p = argparse.ArgumentParser(description="Minimal HTTP server")
-    p.add_argument("-p", "--port", type=int, default=8080)
-    p.add_argument("-d", "--directory", default=".")
-    args = p.parse_args()
-    root = os.path.realpath(args.directory)
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    sock.bind(('0.0.0.0', args.port)); sock.listen(5)
-    print(f"Serving {root} on port {args.port}")
-    try:
-        while True:
-            conn, addr = sock.accept()
-            try: handle_request(conn, root)
-            finally: conn.close()
-    except KeyboardInterrupt: pass
-    finally: sock.close()
+    router = Router()
+    @router.route("GET", "/")
+    def index(req, res, params): return res.html("<h1>Welcome</h1>")
+    @router.route("GET", "/api/users/:id")
+    def get_user(req, res, params): return res.json({"id":params["id"],"name":"Alice"})
+    @router.route("POST", "/api/users")
+    def create_user(req, res, params): res.status = 201; return res.json({"created":True})
+    # Simulate requests
+    for method, path in [("GET","/"),("GET","/api/users/42"),("POST","/api/users"),("GET","/404")]:
+        fn, params = router.match(method, path)
+        if fn:
+            res = Response(); fn(Request(method, path), res, params)
+            print(f"  {method} {path} -> {res.status} {res.headers['Content-Type']}: {res.body[:50]}")
+        else: print(f"  {method} {path} -> 404 Not Found")
 
-if __name__ == "__main__":
-    main()
+if __name__ == "__main__": main()

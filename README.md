@@ -1,11 +1,9 @@
-# http-server2
+# HTTP Server
 
-Minimal HTTP server from scratch (no http.server).
-
-Zero dependencies. Python 3.8+.
+HTTP Server — zero-dependency Python implementation.
 
 ## Usage
 
 ```bash
-python3 http_server2.py --help
+python3 http_server2.py
 ```
